@@ -50,7 +50,7 @@ public:
 
     /* Check if the channel is free for transmission */
 
-    bool can_start() { return s->can_start(); }
+    bool can_start() { return s->can_start(); };
 
 
     /* Returns the maximum number of attempts for each transmission: */

@@ -108,8 +108,7 @@ class ThroughSerial {
     static uint16_t get_receive_time() {
       return TS_RECEIVE_TIME;
     };
-
-
+    
     /* Handle a collision: */
 
     void handle_collision() {

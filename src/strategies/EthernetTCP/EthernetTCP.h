@@ -96,7 +96,7 @@ class EthernetTCP {
     bool can_start() {
       return link.device_id() != 0;
     };
-
+    
 
     /* Returns the maximum number of attempts for each transmission: */
 

@@ -4,7 +4,7 @@
 - **[PJON (Padded Jittering Operative Network) v4.0](/specification/PJON-protocol-specification-v4.0.md)**
 - [Network services list](/specification/PJON-network-services-list.md)
 #### Data link layer
-- [PJDL (Padded Jittering Data Link) v4.1](/src/strategies/SoftwareBitBang/specification/PJDL-specification-v4.1.md)
+- [PJDL (Padded Jittering Data Link) v5.0](/src/strategies/SoftwareBitBang/specification/PJDL-specification-v5.0.md)
 - [PJDLR (Padded Jittering Data Link over Radio) v3.0](/src/strategies/OverSampling/specification/PJDLR-specification-v3.0.md)
 - [PJDLS (Padded Jittering Data Link byte Stuffed) v2.0](/src/strategies/AnalogSampling/specification/PJDLS-specification-v2.0.md)
 - [TSDL (Tardy Serial Data Link) v3.0](/src/strategies/ThroughSerial/specification/TSDL-specification-v3.0.md)
@@ -205,7 +205,7 @@ Medium access              Transmission                Response
  BITS: | 8  |    8     |   8    |  8   |   8    |  8   |
        |____|__________|________|______|________|______|
 ```
-The acknowledgment gives reception certainty only when a packet transmission occurs directly without the intermediation of routers or switches. When a packet needs to traverse a network the acknowledgment is generally sent by the nearest router or switch, although does not necessarily mean that the packet is received by its recipient.     
+The acknowledgment ensures reliable delivery only when a packet transmission occurs directly without the intermediation of routers or switches. When a packet needs to traverse a network the acknowledgment is transmitted by the nearest intermediary therefore it ensures only best-effort delivery.     
 
 #### Local mode
 Depending on header's `MODE` bit packets can contain basic or extended support to identification. Local mode required by header's `MODE` bit low supports connectivity for up to 254 devices. In the graph below is represented the simplest local mode packet format sending `@` (decimal 64) to device `12`:

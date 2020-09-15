@@ -92,7 +92,6 @@ class OverSampling {
       return true;
     };
 
-
     /* Returns the maximum number of attempts for each transmission: */
 
     static uint8_t get_max_attempts() {
