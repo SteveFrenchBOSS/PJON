@@ -389,6 +389,7 @@ struct PJONTools {
   /* Fills a PJON_Packet_Info struct with data parsing a packet: */
 
   static void parse_header(const uint8_t *packet, PJON_Packet_Info &info) {
+    #pragma GCC diagnostic ignored "-Wclass-memaccess"
     memset(&info, 0, sizeof info);
     uint8_t index = 0;
     info.rx.id = packet[index++];
