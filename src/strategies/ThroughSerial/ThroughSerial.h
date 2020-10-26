@@ -375,7 +375,9 @@ class ThroughSerial {
       if(_enable_RS485_txe_pin != TS_NOT_ASSIGNED) {
         PJON_IO_WRITE(_enable_RS485_txe_pin, HIGH);
         if(_enable_RS485_rxe_pin != TS_NOT_ASSIGNED)
-          PJON_IO_WRITE(_enable_RS485_rxe_pin, HIGH);
+          {
+            PJON_IO_WRITE(_enable_RS485_rxe_pin, HIGH);
+          }
         wait_RS485_pin_change();
       }
     };
@@ -385,7 +387,9 @@ class ThroughSerial {
         wait_RS485_pin_change();
         PJON_IO_WRITE(_enable_RS485_txe_pin, LOW);
         if(_enable_RS485_rxe_pin != TS_NOT_ASSIGNED)
+        {
           PJON_IO_WRITE(_enable_RS485_rxe_pin, LOW);
+        }
       }
     };
 

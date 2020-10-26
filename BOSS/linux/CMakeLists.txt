@@ -9,8 +9,9 @@ add_compile_options(-Wall -Wextra -Werror)
 
 project("pingpong")
 
-include_directories("../../src")
+include_directories("../../src" "../../include")
 
-add_definitions(-DLINUX)
 
-add_executable(pingponglinux main.cpp boss_pjon_serial.cpp)
+add_definitions(-DLINUX )
+
+add_executable(pingponglinux main.cpp )

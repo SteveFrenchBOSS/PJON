@@ -50,7 +50,7 @@ void delay(uint32_t delay_value_ms) {
 /* Open serial port ----------------------------------------------------- */
 
 int serialOpen(const char *device, const int baud) {
-  speed_t bd;
+  //speed_t bd;
   int fd;
 
   if((fd = open(device, O_NDELAY | O_NOCTTY | O_NONBLOCK | O_RDWR)) == -1)

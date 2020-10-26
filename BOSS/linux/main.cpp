@@ -1,26 +1,106 @@
 
-#include "boss_pjon_serial.hpp"
-
+#include <inttypes.h>
+#include <stdlib.h>
+#include <string.h>
 #include <iostream>
 
+#include "spdlog/spdlog.h"
+
+// This needs to be the last thing you include for some fucked up reason...
+#include <PJONThroughSerial.h>
+
 using namespace std::string_literals;
+
+// This needs to be in the same file beacause of the
+// *terrible* way PJON_LINUX_Interface is written
+class serial_raii
+{
+private:
+    int _fh = 0;
+    serial_raii(int fh) { _fh = fh; }
+
+public:
+    static serial_raii init(const char *file, int baud)
+    {
+        auto fh = serialOpen(file, baud);
+
+        if (fh == -1)
+        {
+            spdlog::error("Couldnt open file {}", file);
+            throw std::runtime_error("Couldn't open serial file");
+        }
+
+        return serial_raii(fh);
+    }
+    ~serial_raii() { close(_fh); }
+    int get_file_handle() { return _fh; }
+};
 
 const uint8_t ID = 45;
 
 const uint32_t BAUD = 115200;
 const std::string SERIAL_FILE = "/dev/ttySO1"; // todo:
 
-int main()
+PJONThroughSerial bus(ID);
+
+void receiver_function(uint8_t *payload,
+                       uint16_t length,
+                       const PJON_Packet_Info &packet_info)
 {
+    /* Make use of the payload before sending something, the buffer where payload points to is
+     overwritten when a new message is dispatched */
+    std::stringstream ss;
+    ss << "payload :" << std::hex;
+    for (auto i = 0; i < length; i++)
+    {
+        ss << payload[i];
+    }
+    ss << " packet info: ";
+    ss << packet_info.header;
+
+    std::cout << ss.str() << std::endl;
+};
+
+int main(int argc, char *argv[])
+{
+    spdlog::info("Command line arguments:");
+    for (auto i = 0; i < argc; i++)
+    {
+        spdlog::info(argv[i]);
+    }
+
+    spdlog::info("Setting reciever");
+
+    bus.set_receiver(receiver_function);
+
+    spdlog::info("Opening serial... \n");
     try
     {
-        // This is basically the
-        BOSS::PJONSerial ser = BOSS::PJONSerial::Init(SERIAL_FILE, BAUD);
+        serial_raii serial = serial_raii::init(SERIAL_FILE.c_str(), BAUD);
 
-        std::cout << ser.getString() << std::endl;
+        spdlog::info("Setting serial");
+        bus.strategy.set_serial((uint16_t)serial.get_file_handle());
+        bus.strategy.set_baud_rate(BAUD);
+
+        spdlog::info("Opening bus... \n");
+        bus.begin();
+        spdlog::info("Attempting to roll bus... \n");
+        bus.update();
+        spdlog::info("Attempting to receive from bus... \n");
+        bus.receive();
+        spdlog::info("Success! \n");
+
+        while (true)
+        {
+            bus.update();
+            bus.receive();
+        }
+
+        return 0;
     }
     catch (std::exception &e)
     {
-        std::cout << e.what() << std::endl;
+        std::cerr << e.what();
+        return -1;
     }
 }
