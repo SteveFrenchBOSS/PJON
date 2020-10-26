@@ -9,9 +9,15 @@ add_compile_options(-Wall -Wextra -Werror)
 
 project("pingpong")
 
-include_directories("../../src" "../../include")
+set(BOOST "../../../boost_1_74_0")
+
+include_directories("../../src" "../../include" "${BOOST}/boost")
+
+link_directories(${BOOST}/stage/lib)
 
 
 add_definitions(-DLINUX )
 
 add_executable(pingponglinux main.cpp )
+
+target_link_libraries(pingponglinux boost_program_options)

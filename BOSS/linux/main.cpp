@@ -6,10 +6,13 @@
 
 #include "spdlog/spdlog.h"
 
+#include <boost/program_options.hpp>
+
 // This needs to be the last thing you include for some fucked up reason...
 #include <PJONThroughSerial.h>
 
 using namespace std::string_literals;
+namespace po = boost::program_options;
 
 // This needs to be in the same file beacause of the
 // *terrible* way PJON_LINUX_Interface is written
@@ -68,6 +71,13 @@ int main(int argc, char *argv[])
     {
         spdlog::info(argv[i]);
     }
+
+    po::options_description desc("Allowed command line arguments");
+    desc.add_options()("PJON ID", po::value<uint8_t>(), "Bus ID to use for PJON");
+
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     spdlog::info("Setting reciever");
 
