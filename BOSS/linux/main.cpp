@@ -1,8 +1,12 @@
+#define PJON_INCLUDE_TSA true
 
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <iostream>
+
+#include <chrono>
+#include <thread>
 
 #include "spdlog/spdlog.h"
 
@@ -12,10 +16,11 @@
 #include <PJONThroughSerial.h>
 
 using namespace std::string_literals;
+using namespace std::chrono_literals;
 namespace po = boost::program_options;
 
-// This needs to be in the same file beacause of the
-// *terrible* way PJON_LINUX_Interface is written
+/// This needs to be in the same file beacause of the
+/// *terrible* way PJON_LINUX_Interface is written
 class serial_raii
 {
 private:
@@ -23,6 +28,11 @@ private:
     serial_raii(int fh) { _fh = fh; }
 
 public:
+    //Disable default constructors. We only want there to be 1 instance only.
+    serial_raii() = delete;
+    serial_raii(const serial_raii &) = delete;
+
+    /// Throws runtime_error on failure
     static serial_raii init(const char *file, int baud)
     {
         auto fh = serialOpen(file, baud);
@@ -43,12 +53,10 @@ public:
     int get_file_handle() { return _fh; }
 };
 
-uint8_t id = 45;
+uint8_t id = 0;
 
-const uint32_t BAUD = 115200;
-const std::string SERIAL_FILE = "/dev/ttyO1"; // todo:
-
-PJONThroughSerial bus;
+const uint32_t BAUD = 1'000'000;
+const std::string SERIAL_FILE = "/dev/ttyS1"; // todo:
 
 void receiver_function(uint8_t *payload,
                        uint16_t length,
@@ -77,7 +85,11 @@ int main(int argc, char *argv[])
     }
 
     po::options_description desc("Command line arguments");
-    desc.add_options()("id", po::value<uint8_t>()->required(), "Bus ID to use for PJON")("ll", po::value<std::string>(), "Log levels: trace, debug, info, warning, error, critical, off");
+
+    // We can't use uint8 for id because it gets treated as a char
+    // Check and cast later on...
+    desc.add_options()("id", po::value<int>()->required(), "Bus ID to use for PJON")("ll", po::value<std::string>(),
+                                                                                     "Log levels: trace, debug, info, warning, error, critical, off");
 
     po::variables_map vm;
     try
@@ -92,9 +104,26 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    id = vm["id"].as<uint8_t>();
+    int id_ = vm["id"].as<int>();
+    if (id_ < 0)
+    {
+        spdlog::error("id {} is negative!");
+        throw std::runtime_error("Bad id");
+    }
+    if (id_ > 255)
+    {
+        spdlog::error("id {} is too large!");
+        throw std::runtime_error("Bad id");
+    }
 
-    bus.set_bus_id(&id);
+    id = (uint8_t)id_;
+
+    spdlog::info("Setting bus id: {}", id);
+
+    PJONThroughSerial bus(id);
+    bus.set_communication_mode(PJON_HALF_DUPLEX);
+
+    spdlog::debug("Bus id: {}", bus.device_id()); // Get device id
 
     std::string ll = vm["ll"].empty() ? "trace"s : vm["ll"].as<std::string>();
 
@@ -111,23 +140,7 @@ int main(int argc, char *argv[])
 
     spdlog::trace("Setting reciever function");
 
-    bus.set_receiver(
-        [](uint8_t *payload,
-           uint16_t length,
-           const PJON_Packet_Info &packet_info) {
-            /* Make use of the payload before sending something, the buffer where payload points to is
-            overwritten when a new message is dispatched */
-            std::stringstream ss;
-            ss << "payload :" << std::hex;
-            for (auto i = 0; i < length; i++)
-            {
-                ss << payload[i];
-            }
-            ss << " packet info: ";
-            ss << packet_info.header << packet_info.hops; //todo: print all data
-
-            spdlog::info(ss.str());
-        });
+    bus.set_receiver(receiver_function);
 
     spdlog::info("Opening serial");
     try
@@ -140,16 +153,36 @@ int main(int argc, char *argv[])
 
         spdlog::info("Opening bus");
         bus.begin();
-        spdlog::info("Attempting to roll bus");
-        bus.update();
-        spdlog::info("Attempting to receive from bus");
-        bus.receive();
-        spdlog::info("Success");
 
         while (true)
         {
+            spdlog::trace("Sending \"hello\"");
+            bus.send(45, "hello", 5);
+
+            spdlog::trace("bus.update()");
             bus.update();
-            bus.receive();
+
+            spdlog::trace("bus.receive()");
+
+            switch (bus.receive(1000))
+            {
+            case PJON_BUSY:
+                spdlog::warn("PJON_BUSY");
+                break;
+            case PJON_ACK:
+                spdlog::info("PJON_ACK");
+                break;
+            case PJON_NAK:
+                spdlog::warn("PJON_NAK");
+                break;
+            case PJON_FAIL:
+                spdlog::warn("PJON_FAIL");
+                break;
+            default:
+                break;
+            }
+
+            std::this_thread::sleep_for(1s);
         }
 
         return 0;

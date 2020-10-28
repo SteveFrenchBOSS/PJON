@@ -1,2 +1,7 @@
 .vscode
 build/**
+BOSS/linux/CMakeFiles/**
+BOSS/linux/CMakeCache.txt
+BOSS/linux/Makefile
+BOSS/linux/pingponglinux
+BOSS/linux/cmake_install.cmake

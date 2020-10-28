@@ -11,14 +11,16 @@ add_compile_options(-Wall -Wextra -Werror -Wno-psabi)
 
 project(pingpong CXX)
 
-set(BOOST "../boost_1_74_0")
+set(BOOST "../../../boost_1_74_0")
 
-include_directories("src" "include" "${BOOST}/boost")
+include_directories("../../src" "../../include" "${BOOST}/boost")
 
 link_directories(${BOOST}/stage/lib)
 
 add_definitions(-DLINUX )
 
-add_executable(pingponglinux BOSS/linux/main.cpp )
+add_executable(pingponglinux main.cpp )
 
 target_link_libraries(pingponglinux boost_program_options.a stdc++.a )
+
+
