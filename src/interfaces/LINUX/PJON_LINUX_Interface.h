@@ -41,10 +41,10 @@ extern "C" {
   #include <thread>
   #include <sstream>
 
-  #define OUTPUT 1
-  #define INPUT 0
-  #define HIGH 1
-  #define LOW 0
+  // #define OUTPUT 1
+  // #define INPUT 0
+  // #define HIGH 1
+  // #define LOW 0
   #define INPUT_PULLUP 0x2
   #define LSBFIRST 1
   #define MSBFIRST 2
