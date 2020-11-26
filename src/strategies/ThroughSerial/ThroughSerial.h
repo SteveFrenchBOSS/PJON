@@ -30,431 +30,566 @@
 #pragma once
 
 // START  symbol 10010101 - 0x95 - 
-#define TS_START        149
+#define TS_START 149
 // END    symbol 11101010 - 0xea - ê
-#define TS_END          234
+#define TS_END 234
 // ESCAPE symbol 10111011 - 0xBB - »
-#define TS_ESC          187
+#define TS_ESC 187
 
 // Used to signal communication failure
-#define TS_FAIL       65535
+#define TS_FAIL 65535
 // Used for unused pin handling
 #define TS_NOT_ASSIGNED 255
 
 #include "Timing.h"
 
-enum TS_state_t : uint8_t {
-  TS_WAITING,
-  TS_RECEIVING,
-  TS_WAITING_ESCAPE,
-  TS_WAITING_END,
-  TS_DONE
+#define DIAGNOSE 1
+
+enum TS_state_t : uint8_t
+{
+	TS_WAITING,
+	TS_RECEIVING,
+	TS_WAITING_ESCAPE,
+	TS_WAITING_END,
+	TS_DONE
 };
 
 // Recommended receive time for this strategy, in microseconds
 #ifndef TS_RECEIVE_TIME
-  #define TS_RECEIVE_TIME 0
+#define TS_RECEIVE_TIME 0
 #endif
 
-class ThroughSerial {
-  public:
-    uint8_t buffer[PJON_PACKET_MAX_LENGTH] = {0};
-    uint16_t position = 0;
-    TS_state_t state = TS_WAITING;
-    PJON_SERIAL_TYPE serial;
+class ThroughSerial
+{
+public:
+	uint8_t buffer[PJON_PACKET_MAX_LENGTH] = {0};
+	uint16_t position = 0;
+	TS_state_t state = TS_WAITING;
+	PJON_SERIAL_TYPE serial;
 
-    /* Returns suggested delay related to the attempts passed as parameter: */
+	/* Returns suggested delay related to the attempts passed as parameter: */
 
-    uint32_t back_off(uint8_t attempts) {
-      uint32_t result = attempts;
-      for(uint8_t d = 0; d < TS_BACK_OFF_DEGREE; d++)
-        result *= (uint32_t)(attempts);
-      return result + PJON_RANDOM(TS_COLLISION_DELAY);
-    };
+	uint32_t back_off(uint8_t attempts)
+	{
+		uint32_t result = attempts;
+		for (uint8_t d = 0; d < TS_BACK_OFF_DEGREE; d++)
+			result *= (uint32_t)(attempts);
+		return result + PJON_RANDOM(TS_COLLISION_DELAY);
+	};
 
-
-    /* Begin method, to be called on initialization:
+	/* Begin method, to be called on initialization:
        (returns always true) */
 
-    bool begin(uint8_t did = 0) {
-      PJON_DELAY(PJON_RANDOM(TS_INITIAL_DELAY) + did);
-      _last_reception_time = PJON_MICROS();
-      return true;
-    };
+	bool begin(uint8_t did = 0)
+	{
+		PJON_DELAY(PJON_RANDOM(TS_INITIAL_DELAY) + did);
+		_last_reception_time = PJON_MICROS();
+		return true;
+	};
 
+	/* Check if the channel is free for transmission: */
 
-    /* Check if the channel is free for transmission: */
+	bool can_start()
+	{
+		PJON_DELAY_MICROSECONDS(PJON_RANDOM(TS_COLLISION_DELAY));
+		bool not_waiting = state != TS_WAITING;
+		// This was causing issues when
+		//	"bus.strategy.set_RS485_txe_pin(RS486_TX_ENABLE_PIN);"
+		// is enabled
+		// I have inverted the flag from available to not_availiable
+		bool serial_not_available = !PJON_SERIAL_AVAILABLE(serial);
+		bool timeout = (uint32_t)(PJON_MICROS() - _last_reception_time) < TS_TIME_IN;
 
-    bool can_start() {
-      PJON_DELAY_MICROSECONDS(PJON_RANDOM(TS_COLLISION_DELAY));
-      if(
-        (state != TS_WAITING) ||
-        PJON_SERIAL_AVAILABLE(serial) ||
-        ((uint32_t)(PJON_MICROS() - _last_reception_time) < TS_TIME_IN)
-      ) return false;
-      return true;
-    };
+		if (not_waiting || 
+		//serial_not_available || 
+		timeout)
+		{
+#ifdef DIAGNOSE
+			if (not_waiting)
+				Serial.println("not waiting");
+			if (serial_not_available)
+				Serial.println("serial not availible");
+			if (timeout)
+				Serial.println("timeout");
+#endif
+			return false;
+		}
+		return true;
+	};
 
+	/* Returns the maximum number of attempts for each transmission: */
 
-    /* Returns the maximum number of attempts for each transmission: */
+	static uint8_t get_max_attempts()
+	{
+		return TS_MAX_ATTEMPTS;
+	};
 
-    static uint8_t get_max_attempts() {
-      return TS_MAX_ATTEMPTS;
-    };
+	/* Returns the recommended receive time for this strategy: */
 
+	static uint16_t get_receive_time()
+	{
+		return TS_RECEIVE_TIME;
+	};
 
-    /* Returns the recommended receive time for this strategy: */
+	/* Handle a collision: */
 
-    static uint16_t get_receive_time() {
-      return TS_RECEIVE_TIME;
-    };
-    
-    /* Handle a collision: */
+	void handle_collision()
+	{
+		PJON_DELAY_MICROSECONDS(PJON_RANDOM(TS_COLLISION_DELAY));
+	};
 
-    void handle_collision() {
-      PJON_DELAY_MICROSECONDS(PJON_RANDOM(TS_COLLISION_DELAY));
-    };
+	/* Receive Byte */
 
+	int16_t receive_byte()
+	{
+		int16_t value = PJON_SERIAL_READ(serial);
+#ifdef DIAGNOSE
+		Serial.printf("Byte received %x\n", value);
+#endif
 
-    /* Receive Byte */
+		if (value == -1)
+			return -1;
+		_last_reception_time = PJON_MICROS();
+		return value;
+	};
 
-    int16_t receive_byte() {
-      int16_t value = PJON_SERIAL_READ(serial);
-      if(value == -1) return -1;
-      _last_reception_time = PJON_MICROS();
-      return value;
-    };
+	/* It returns the state of the previous transmission: */
 
+	uint16_t receive_response()
+	{
+		if (_fail)
+			return TS_FAIL;
+		uint32_t time = PJON_MICROS();
+		uint8_t i = 0;
+		while ((uint32_t)(PJON_MICROS() - time) < TS_RESPONSE_TIME_OUT)
+		{
 
-    /* It returns the state of the previous transmission: */
+			bool serial_available = PJON_SERIAL_AVAILABLE(serial);
+			if (!serial_available)
+			{
+#ifdef DIAGNOSE
+				//Serial.println("Serial not available");
+#endif
+			}
+			else
+			{
+				int16_t read = PJON_SERIAL_READ(serial);
+#ifdef DIAGNOSE
+				Serial.println(read);
+#endif
 
-    uint16_t receive_response() {
-      if(_fail) return TS_FAIL;
-      uint32_t time = PJON_MICROS();
-      uint8_t i = 0;
-      while((uint32_t)(PJON_MICROS() - time) < TS_RESPONSE_TIME_OUT) {
-        if(PJON_SERIAL_AVAILABLE(serial)) {
-          int16_t read = PJON_SERIAL_READ(serial);
-          _last_reception_time = PJON_MICROS();
-          if(read >= 0) {
-            if(_response[i++] != read) return TS_FAIL;
-            if(i == TS_RESPONSE_LENGTH) return PJON_ACK;
-          }
-        }
-        #if defined(_WIN32)
-          PJON_DELAY_MICROSECONDS(TS_RESPONSE_TIME_OUT / 10);
-        #endif
-      }
-      return TS_FAIL;
-    };
+				_last_reception_time = PJON_MICROS();
+				if (read >= 0)
+				{
+					if (_response[i++] != read)
+						return TS_FAIL;
+					if (i == TS_RESPONSE_LENGTH)
+						return PJON_ACK;
+				}
+			}
 
+#if defined(_WIN32)
+			PJON_DELAY_MICROSECONDS(TS_RESPONSE_TIME_OUT / 10);
+#endif
+		}
+#ifdef DIAGNOSE
+		Serial.println("Response timeout");
+#endif
+		return TS_FAIL;
+	};
 
-    /* Receive a string: */
+	/* Receive a string: */
 
-    uint16_t receive_frame(uint8_t *data, uint16_t max_length) {
-      if( // Reception attempts are spaced by an interval
-        _last_call_time &&
-        (uint32_t)(PJON_MICROS() - _last_call_time) < _read_interval
-      ) return TS_FAIL;
+	uint16_t receive_frame(uint8_t *data, uint16_t max_length)
+	{
+		if ( // Reception attempts are spaced by an interval
+			_last_call_time &&
+			(uint32_t)(PJON_MICROS() - _last_call_time) < _read_interval)
+		{
 
-      _last_call_time = PJON_MICROS();
+#ifdef DIAGNOSE
+			Serial.println("_last_call_time && (uint32_t)(PJON_MICROS() - _last_call_time) < _read_interval)");
+#endif
+			return TS_FAIL;
+		}
 
-      if( // If reception timeout is reached discard data
-        (
-          (state == TS_RECEIVING) ||
-          (state == TS_WAITING_END) ||
-          (state == TS_WAITING_ESCAPE)
-        ) &&
-        ((uint32_t)(PJON_MICROS() - _last_reception_time) > TS_BYTE_TIME_OUT)
-      ) {
-        state = TS_WAITING;
-        return TS_FAIL;
-      }
+		_last_call_time = PJON_MICROS();
 
-      switch(state) {
-        case TS_WAITING: {
-          while(PJON_SERIAL_AVAILABLE(serial)) {
-            int16_t value = receive_byte();
-            if(value == -1) return TS_FAIL;
-            if(value == TS_START) {
-              state = TS_RECEIVING;
-              position = 0;
-              return TS_FAIL;
-            }
-          };
-          break;
-        }
-        case TS_RECEIVING: {
-          while(PJON_SERIAL_AVAILABLE(serial)) {
-            int16_t value = receive_byte();
-            if(value == -1) return TS_FAIL;
-            if(value == TS_START) {
-              state = TS_WAITING;
-              return TS_FAIL;
-            }
-            if(value == TS_ESC) {
-              if(!PJON_SERIAL_AVAILABLE(serial)) {
-                state = TS_WAITING_ESCAPE;
-                return TS_FAIL;
-              } else {
-                value = receive_byte();
-                if(value == -1) return TS_FAIL;
-                value = value ^ TS_ESC;
-                if(
-                  (value != TS_START) &&
-                  (value != TS_ESC) &&
-                  (value != TS_END)
-                ) {
-                  state = TS_WAITING;
-                  return TS_FAIL;
-                }
-                buffer[position++] = (uint8_t)value;
-                continue;
-              }
-            }
+		auto receiving = (state == TS_RECEIVING);
+		auto waiting_end = (state == TS_WAITING_END);
+		auto waiting_escape = (state == TS_WAITING_ESCAPE);
+		auto byte_timeout = ((uint32_t)(PJON_MICROS() - _last_reception_time) > TS_BYTE_TIME_OUT);
 
-            if(max_length == 1) {
-              state = TS_WAITING_END;
-              return TS_FAIL;
-            }
+		if ( // If reception timeout is reached discard data
+			(receiving || waiting_end || waiting_escape) &&
+			byte_timeout)
+		{
+			state = TS_WAITING;
+#ifdef DIAGNOSE
+			Serial.printf("(receiving %i || waiting_end %i || waiting_escape %i) && byte_timeout %i\n",
+						  receiving,
+						  waiting_end,
+						  waiting_escape,
+						  byte_timeout);
+#endif
+			return TS_FAIL;
+		}
 
-            if(position + 1 >= PJON_PACKET_MAX_LENGTH) {
-              state = TS_WAITING;
-              return TS_FAIL;
-            }
+		switch (state)
+		{
+		case TS_WAITING:
+		{
+#ifdef DIAGNOSE
+			Serial.println(TS_WAITING);
+#endif
+			while (PJON_SERIAL_AVAILABLE(serial))
+			{
+				int16_t value = receive_byte();
+				if (value == -1)
+				{
+#ifdef DIAGNOSE
+					Serial.println("int16_t value = receive_byte();	if (value == -1)");
+#endif
+					return TS_FAIL;
+				}
+				if (value == TS_START)
+				{
+					state = TS_RECEIVING;
+					position = 0;
+					return TS_FAIL;
+				}
+			};
+			break;
+		}
+		case TS_RECEIVING:
+		{
+#ifdef DIAGNOSE
+			Serial.println(TS_RECEIVING);
+#endif
+			while (PJON_SERIAL_AVAILABLE(serial))
+			{
+				int16_t value = receive_byte();
+				if (value == -1)
+					return TS_FAIL;
+				if (value == TS_START)
+				{
+					state = TS_WAITING;
+					return TS_FAIL;
+				}
+				if (value == TS_ESC)
+				{
+					if (!PJON_SERIAL_AVAILABLE(serial))
+					{
+						state = TS_WAITING_ESCAPE;
+						return TS_FAIL;
+					}
+					else
+					{
+						value = receive_byte();
+						if (value == -1)
+							return TS_FAIL;
+						value = value ^ TS_ESC;
+						if (
+							(value != TS_START) &&
+							(value != TS_ESC) &&
+							(value != TS_END))
+						{
+							state = TS_WAITING;
+							return TS_FAIL;
+						}
+						buffer[position++] = (uint8_t)value;
+						continue;
+					}
+				}
 
-            if(value == TS_END) {
-              state = TS_DONE;
-              return TS_FAIL;
-            }
+				if (max_length == 1)
+				{
+					state = TS_WAITING_END;
+					return TS_FAIL;
+				}
 
-            buffer[position++] = (uint8_t)value;
-          }
-          return TS_FAIL;
-        }
+				if (position + 1 >= PJON_PACKET_MAX_LENGTH)
+				{
+					state = TS_WAITING;
+					return TS_FAIL;
+				}
 
-        case TS_WAITING_ESCAPE: {
-          if(PJON_SERIAL_AVAILABLE(serial)) {
-            int16_t value = receive_byte();
-            if(value == -1) return TS_FAIL;
-            value = value ^ TS_ESC;
-            if(
-              (value != TS_START) &&
-              (value != TS_ESC) &&
-              (value != TS_END)
-            ) {
-              state = TS_WAITING;
-              return TS_FAIL;
-            }
-            buffer[position++] = (uint8_t)value;
-            state = TS_RECEIVING;
-            return TS_FAIL;
-          }
-          break;
-        }
+				if (value == TS_END)
+				{
+					state = TS_DONE;
+					return TS_FAIL;
+				}
 
-        case TS_WAITING_END: {
-          if(PJON_SERIAL_AVAILABLE(serial)) {
-            int16_t value = receive_byte();
-            if(value == -1) return TS_FAIL;
-            if(value == TS_END) {
-              state = TS_DONE;
-              return TS_FAIL;
-            } else {
-              state = TS_WAITING;
-              return TS_FAIL;
-            }
-          }
-          break;
-        }
+				buffer[position++] = (uint8_t)value;
+			}
+			return TS_FAIL;
+		}
 
-        case TS_DONE: {
-          memcpy(&data[0], &buffer[0], position);
-          prepare_response(buffer, position);
-          state = TS_WAITING;
-          return position;
-        }
+		case TS_WAITING_ESCAPE:
+		{
+#ifdef DIAGNOSE
+			Serial.println(TS_WAITING_ESCAPE);
+#endif
+			if (PJON_SERIAL_AVAILABLE(serial))
+			{
+				int16_t value = receive_byte();
+				if (value == -1)
+				{
+#ifdef DIAGNOSE
+					Serial.println("***Didn't receive escape character");
+#endif
+					return TS_FAIL;
+				}
+				value = value ^ TS_ESC;
+				if (
+					(value != TS_START) &&
+					(value != TS_ESC) &&
+					(value != TS_END))
+				{
+					state = TS_WAITING;
+					return TS_FAIL;
+				}
+				buffer[position++] = (uint8_t)value;
+				state = TS_RECEIVING;
+				return TS_FAIL;
+			}
+			break;
+		}
 
-      };
-      return TS_FAIL;
-    };
+		case TS_WAITING_END:
+		{
+#ifdef DIAGNOSE
+			Serial.println(TS_WAITING_END);
+#endif
+			if (PJON_SERIAL_AVAILABLE(serial))
+			{
+				int16_t value = receive_byte();
+				if (value == -1)
+					return TS_FAIL;
+				if (value == TS_END)
+				{
+					state = TS_DONE;
+					return TS_FAIL;
+				}
+				else
+				{
+					state = TS_WAITING;
+					return TS_FAIL;
+				}
+			}
+			break;
+		}
 
+		case TS_DONE:
+		{
+#ifdef DIAGNOSE
+			Serial.println(TS_DONE);
+#endif
+			memcpy(&data[0], &buffer[0], position);
+			prepare_response(buffer, position);
+			state = TS_WAITING;
+			return position;
+		}
+		};
+		return TS_FAIL;
+	};
 
-    /* Send a byte and wait for its transmission end */
+	/* Send a byte and wait for its transmission end */
 
-    void send_byte(uint8_t b) {
-      uint32_t time = PJON_MICROS();
-      int16_t result = 0;
-      while(
-        ((result = PJON_SERIAL_WRITE(serial, b)) != 1) &&
-        ((uint32_t)(PJON_MICROS() - time) < TS_BYTE_TIME_OUT)
-      );
-      if(result != 1) _fail = true;
-    };
+	void send_byte(uint8_t b)
+	{
+		uint32_t time = PJON_MICROS();
+		int16_t result = 0;
+		while (
+			((result = PJON_SERIAL_WRITE(serial, b)) != 1) &&
+			((uint32_t)(PJON_MICROS() - time) < TS_BYTE_TIME_OUT))
+			;
+		if (result != 1)
+			_fail = true;
+	};
 
-
-    /* The last 5 bytes of the frame are used as a unique identifier within
+	/* The last 5 bytes of the frame are used as a unique identifier within
        the response. PJON has CRC8 or CRC32 at the end of the packet, encoding
        a CRC (that is a good hashing algorithm) and using 40 bits looks enough
        to provide a relatively safe response that should be nearly flawless
        (yield few false positives per millennia). */
 
-    void prepare_response(const uint8_t *buffer, uint16_t position) {
-      uint8_t raw = 0;
-      for(int8_t i = 0; i < TS_RESPONSE_LENGTH; i++) {
-        raw = buffer[(position - ((TS_RESPONSE_LENGTH - 1) - i)) - 1];
-        _response[i] = (
-          (raw == TS_START) || (raw == TS_ESC) || (raw == TS_END)
-        ) ? (raw - 1) : raw; // Avoid encoding symbols
-      }
-    };
+	void prepare_response(const uint8_t *buffer, uint16_t position)
+	{
+		uint8_t raw = 0;
+		for (int8_t i = 0; i < TS_RESPONSE_LENGTH; i++)
+		{
+			raw = buffer[(position - ((TS_RESPONSE_LENGTH - 1) - i)) - 1];
+			_response[i] = ((raw == TS_START) || (raw == TS_ESC) || (raw == TS_END)) ? (raw - 1) : raw; // Avoid encoding symbols
+		}
+	};
 
+	/* Send byte response to the packet's transmitter */
 
-    /* Send byte response to the packet's transmitter */
+	void send_response(uint8_t response)
+	{
+		if (response == PJON_ACK)
+		{
+			start_tx();
+			wait_RS485_pin_change();
+			for (uint8_t i = 0; i < TS_RESPONSE_LENGTH; i++)
+				send_byte(_response[i]);
+			PJON_SERIAL_FLUSH(serial);
+			wait_RS485_pin_change();
+			end_tx();
+		}
+	};
 
-    void send_response(uint8_t response) {
-      if(response == PJON_ACK) {
-        start_tx();
-        wait_RS485_pin_change();
-        for(uint8_t i = 0; i < TS_RESPONSE_LENGTH; i++)
-          send_byte(_response[i]);
-        PJON_SERIAL_FLUSH(serial);
-        wait_RS485_pin_change();
-        end_tx();
-      }
-    };
+	/* Send a string: */
 
-
-    /* Send a string: */
-
-    void send_frame(uint8_t *data, uint16_t length) {
-      _fail = false;
-      start_tx();
-      uint16_t overhead = 2;
-      // Add frame flag
-      send_byte(TS_START);
-      for(uint16_t b = 0; b < length; b++) {
-        if(_fail) return;
-        // Byte-stuffing
-        if(
-          (data[b] == TS_START) ||
-          (data[b] == TS_ESC) ||
-          (data[b] == TS_END)
-        ) {
-          send_byte(TS_ESC);
-          send_byte(data[b] ^ TS_ESC);
-          overhead++;
-        } else send_byte(data[b]);
-      }
-      send_byte(TS_END);
-      /* On RPI flush fails to wait until all bytes are transmitted
+	void send_frame(uint8_t *data, uint16_t length)
+	{
+		_fail = false;
+		start_tx();
+		uint16_t overhead = 2;
+		// Add frame flag
+		send_byte(TS_START);
+		for (uint16_t b = 0; b < length; b++)
+		{
+			if (_fail)
+				return;
+			// Byte-stuffing
+			if (
+				(data[b] == TS_START) ||
+				(data[b] == TS_ESC) ||
+				(data[b] == TS_END))
+			{
+				send_byte(TS_ESC);
+				send_byte(data[b] ^ TS_ESC);
+				overhead++;
+			}
+			else
+				send_byte(data[b]);
+		}
+		send_byte(TS_END);
+/* On RPI flush fails to wait until all bytes are transmitted
          here RPI forced to wait blocking using delayMicroseconds */
-      #if defined(RPI) || defined(LINUX)
-        if(_bd)
-          PJON_DELAY_MICROSECONDS(
-            ((1000000 / (_bd / 8)) + _flush_offset) * (overhead + length)
-          );
-      #endif
-      PJON_SERIAL_FLUSH(serial);
-      end_tx();
-      // Prepare expected response for the receive_response call
-      prepare_response(data, length);
-    };
+#if defined(RPI) || defined(LINUX)
+		if (_bd)
+			PJON_DELAY_MICROSECONDS(
+				((1000000 / (_bd / 8)) + _flush_offset) * (overhead + length));
+#endif
+		PJON_SERIAL_FLUSH(serial);
+		end_tx();
+		// Prepare expected response for the receive_response call
+		prepare_response(data, length);
+	};
 
+	/* Pass the Serial port where you want to operate with */
 
-    /* Pass the Serial port where you want to operate with */
+	void set_serial(PJON_SERIAL_TYPE serial_port)
+	{
+		serial = serial_port;
+	};
 
-    void set_serial(PJON_SERIAL_TYPE serial_port) {
-      serial = serial_port;
-    };
+	/* RS485 enable pins handling: */
 
+	void start_tx()
+	{
+		if (_enable_RS485_txe_pin != TS_NOT_ASSIGNED)
+		{
+#ifdef DIAGNOSE
+			Serial.println("Setting tx enable high");
+#endif
+			PJON_IO_WRITE(_enable_RS485_txe_pin, HIGH);
+			if (_enable_RS485_rxe_pin != TS_NOT_ASSIGNED)
+			{
+				PJON_IO_WRITE(_enable_RS485_rxe_pin, HIGH);
+			}
+			wait_RS485_pin_change();
+		}
+	};
 
-    /* RS485 enable pins handling: */
+	void end_tx()
+	{
+		if (_enable_RS485_txe_pin != TS_NOT_ASSIGNED)
+		{
+#ifdef DIAGNOSE
+			Serial.println("Setting tx enable low");
+#endif
+			PJON_IO_WRITE(_enable_RS485_txe_pin, LOW);
+			if (_enable_RS485_rxe_pin != TS_NOT_ASSIGNED)
+			{
+				PJON_IO_WRITE(_enable_RS485_rxe_pin, LOW);
+			}
+			wait_RS485_pin_change();
+		}
+	};
 
-    void start_tx() {
-      if(_enable_RS485_txe_pin != TS_NOT_ASSIGNED) {
-        PJON_IO_WRITE(_enable_RS485_txe_pin, HIGH);
-        if(_enable_RS485_rxe_pin != TS_NOT_ASSIGNED)
-          {
-            PJON_IO_WRITE(_enable_RS485_rxe_pin, HIGH);
-          }
-        wait_RS485_pin_change();
-      }
-    };
-
-    void end_tx() {
-      if(_enable_RS485_txe_pin != TS_NOT_ASSIGNED) {
-        wait_RS485_pin_change();
-        PJON_IO_WRITE(_enable_RS485_txe_pin, LOW);
-        if(_enable_RS485_rxe_pin != TS_NOT_ASSIGNED)
-        {
-          PJON_IO_WRITE(_enable_RS485_rxe_pin, LOW);
-        }
-      }
-    };
-
-  #if defined(RPI) || defined(LINUX)
-    /* Pass baudrate to ThroughSerial
+#if defined(RPI) || defined(LINUX)
+	/* Pass baudrate to ThroughSerial
        (needed only for RPI flush hack): */
 
-    void set_baud_rate(uint32_t baud) {
-      _bd = baud;
-    };
+	void set_baud_rate(uint32_t baud)
+	{
+		_bd = baud;
+	};
 
-
-    /* Set flush timing offset in microseconds between expected and real
+	/* Set flush timing offset in microseconds between expected and real
        serial byte transmission: */
 
-    void set_flush_offset(uint16_t offset) {
-      _flush_offset = offset;
-    };
-  #endif
+	void set_flush_offset(uint16_t offset)
+	{
+		_flush_offset = offset;
+	};
+#endif
 
-    /* Sets the interval between each read attempt from serial
+	/* Sets the interval between each read attempt from serial
        (TS_READ_INTERVAL or 100 microseconds by default) to allow the buffer
        to fill and to reduce the computation time consumed while polling for
        incoming data.  */
 
-    uint32_t get_read_interval() {
-      return _read_interval;
-    };
+	uint32_t get_read_interval()
+	{
+		return _read_interval;
+	};
 
-    void set_read_interval(uint32_t t) {
-      _read_interval = t;
-    };
+	void set_read_interval(uint32_t t)
+	{
+		_read_interval = t;
+	};
 
-    /* RS485 enable pins setters: */
+	/* RS485 enable pins setters: */
 
-    void set_enable_RS485_pin(uint8_t pin) {
-      set_RS485_txe_pin(pin);
-    };
+	void set_enable_RS485_pin(uint8_t pin)
+	{
+		set_RS485_txe_pin(pin);
+	};
 
-    void set_RS485_rxe_pin(uint8_t pin) {
-      _enable_RS485_rxe_pin = pin;
-      PJON_IO_MODE(_enable_RS485_rxe_pin, OUTPUT);
-    }
+	void set_RS485_rxe_pin(uint8_t pin)
+	{
+		_enable_RS485_rxe_pin = pin;
+		PJON_IO_MODE(_enable_RS485_rxe_pin, OUTPUT);
+	}
 
-    void set_RS485_txe_pin(uint8_t pin) {
-      _enable_RS485_txe_pin = pin;
-      PJON_IO_MODE(_enable_RS485_txe_pin, OUTPUT);
-    }
+	void set_RS485_txe_pin(uint8_t pin)
+	{
+		_enable_RS485_txe_pin = pin;
+		PJON_IO_MODE(_enable_RS485_txe_pin, OUTPUT);
+	}
 
-    void wait_RS485_pin_change() {
-      if(_enable_RS485_txe_pin != TS_NOT_ASSIGNED)
-        PJON_DELAY(_RS485_delay);
-    };
+	void wait_RS485_pin_change()
+	{
+		if (_enable_RS485_txe_pin != TS_NOT_ASSIGNED)
+			PJON_DELAY(_RS485_delay);
+	};
 
-  private:
-  #if defined(RPI) || defined(LINUX)
-    uint16_t _flush_offset = TS_FLUSH_OFFSET;
-    uint32_t _bd;
-  #endif
-    bool     _fail = false;
-    uint8_t  _response[TS_RESPONSE_LENGTH];
-    uint32_t _last_reception_time = 0;
-    uint32_t _last_call_time = 0;
-    uint8_t  _enable_RS485_rxe_pin = TS_NOT_ASSIGNED;
-    uint8_t  _enable_RS485_txe_pin = TS_NOT_ASSIGNED;
-    uint32_t _RS485_delay = TS_RS485_DELAY;
-    uint32_t _read_interval = TS_READ_INTERVAL;
+private:
+#if defined(RPI) || defined(LINUX)
+	uint16_t _flush_offset = TS_FLUSH_OFFSET;
+	uint32_t _bd;
+#endif
+	bool _fail = false;
+	uint8_t _response[TS_RESPONSE_LENGTH];
+	uint32_t _last_reception_time = 0;
+	uint32_t _last_call_time = 0;
+	uint8_t _enable_RS485_rxe_pin = TS_NOT_ASSIGNED;
+	uint8_t _enable_RS485_txe_pin = TS_NOT_ASSIGNED;
+	uint32_t _RS485_delay = TS_RS485_DELAY;
+	uint32_t _read_interval = TS_READ_INTERVAL;
 };
