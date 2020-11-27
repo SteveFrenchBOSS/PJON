@@ -61,7 +61,7 @@ limitations under the License. */
 #include "interfaces/PJON_Interfaces.h"
 #include "PJONDefines.h"
 
-#define DIAGNOSE
+//#define DIAGNOSE
 
 static void PJON_dummy_receiver_handler(
 	uint8_t *,				 // payload

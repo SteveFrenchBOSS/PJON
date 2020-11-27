@@ -43,7 +43,7 @@
 
 #include "Timing.h"
 
-#define DIAGNOSE 1
+//#define DIAGNOSE 1
 
 enum TS_state_t : uint8_t
 {
